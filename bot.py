@@ -103,18 +103,19 @@ RSS_FEEDS = {
 
 KW = {
     "apology": [
-        # Дії гравця — позитивні
+        # Конкретні дії гравця (факти, не епітети)
         "scores","scored","goal","winner","saves","assist",
-        "dazzles","delivers","magic","bicycle kick","free kick",
-        "rescues","advance","through","trophy","tears","dominant",
-        "destroys","virtuoso","frontrunner","player of the tournament",
-        "star","shines","sparks","inspires","leads","wins","victory",
-        "brilliant","superb","clinical","electric","sensational",
-        # Реакція фанатів
-        "apology","proved","silenced","haters","critics","underrated",
-        "comeback","incredible","world class","hat trick","brace",
-        "wonder goal","man of the match","redemption","goat","hero",
-        "masterclass","unbelievable","outstanding","phenomenal",
+        "bicycle kick","free kick","hat trick","brace",
+        "wonder goal","man of the match","penalty scored",
+        "free kick goal","overhead kick","volley",
+        "rescues","advance","through","wins","victory",
+        # Реакція фанатів і медіа
+        "apology","proved","silenced","haters","critics",
+        "underrated","comeback","world class","redemption",
+        "goat","hero","player of the tournament",
+        # Командні результати з позитивом
+        "qualify","qualified","semi-final","final","champion",
+        "through to","progress","advance to",
     ],
     "bandwagon": [
         # Вильоти і поразки
@@ -134,13 +135,15 @@ KW = {
         "penalty denied","wrong decision","overturned","injustice",
         "robbed","scandalous","outrage","red card","video review",
         "not given","disputed","howler","blunder",
-        # Нові VAR тригери
+        # VAR інциденти
         "handball","linesman","flag","ruled out","goal ruled",
-        "furious","banned","horror show","slams referee","under fire",
+        "goal disallowed","furious fans","fans furious",
+        "banned","horror show","slams referee","under fire",
         "minimal contact","soft penalty","dubious","questionable",
         "shocking decision","disgraceful","embarrassing",
         "appeal","protest","complains","complaint",
         "goal-line","clear error","human error",
+        "wrong call","missed call","poor decision",
     ],
 }
 
@@ -208,11 +211,29 @@ def run_web_server():
 # ЛОГІКА АНАЛІЗУ
 # ══════════════════════════════════════════════
 
-# Стоп-слова — якщо є, це не футбольна новина
+# Стоп-слова — якщо є, це не матчева новина (не тригерить продажі)
 STOP_WORDS = [
+    # Нефутбольний контент
     "cannes","oscar","grammy","stock market","election","politician",
     "hospital","medical","surgery","film festival","movie","cinema",
     "album","concert","fashion","startup","funding round",
+    # Трансфери і контракти
+    "transfer","bid","rejected","linked with","loan","contract",
+    "signing","signed","fee","million pound","release clause",
+    "interested in","move to","join","left the club","departure",
+    "rumour","rumor","saga","negotiations","talks",
+    # Клубний футбол і комерція (не ЧС контент)
+    "kit","shirt","jersey","sponsor","sponsorship",
+    "premier league","champions league","la liga","serie a",
+    "bundesliga","ligue 1","eredivisie","mls cup",
+    "debut","medical","salary","wage","buyout",
+    # Загальні анонси без матчу
+    "squad announced","named in squad","injury concern",
+    "fitness doubt","press conference","prediction",
+    "retirement","farewell","legacy","career",
+    "interview","speaks out","breaks silence","opens up",
+    "ranked","ranking","best xi","top 10","history of",
+    "preview","what to watch","things to know",
 ]
 
 # Футбольні контекст-слова — хоча б одне має бути присутнє
@@ -224,10 +245,14 @@ FOOTBALL_CONTEXT = [
     "portugal","netherlands","usa","mexico","morocco","japan",
 ]
 
-def score_text(text):
-    t = text.lower()
+def score_text(title, summary=""):
+    # ФІКС 4: аналізуємо заголовок і summary окремо
+    # Збіг у заголовку = вдвічі важливіший
+    t_title   = title.lower()
+    t_summary = summary.lower() if summary else ""
+    t         = t_title + " " + t_summary  # повний текст для стоп-слів
 
-    # Стоп-фільтр — нефутбольний контент
+    # Стоп-фільтр — нефутбольний / клубний контент
     for stop in STOP_WORDS:
         if stop in t:
             return "apology", 0, [], []
@@ -239,31 +264,80 @@ def score_text(text):
     found_players, found_teams = [], []
 
     for player in PLAYERS:
-        if player.lower() in t:
-            scores["apology"] += 3
+        pl = player.lower()
+        if pl in t_title:
+            scores["apology"] += 4   # в заголовку = х2 вага
             found_players.append(player)
+        elif pl in t_summary:
+            scores["apology"] += 2   # в summary = стандартна вага
 
     for team in TEAMS_BANDWAGON:
-        if team.lower() in t:
+        tm = team.lower()
+        if tm in t_title:
             for kw in KW["bandwagon"]:
-                if kw in t:
+                if kw in t_title:
+                    scores["bandwagon"] += 4  # заголовок = х2
+                    found_teams.append(team)
+                    break
+            else:
+                # Команда в заголовку без бандвагон-слова — перевіряємо summary
+                for kw in KW["bandwagon"]:
+                    if kw in t_summary:
+                        scores["bandwagon"] += 2
+                        found_teams.append(team)
+                        break
+        elif tm in t_summary:
+            for kw in KW["bandwagon"]:
+                if kw in t_summary:
                     scores["bandwagon"] += 2
                     found_teams.append(team)
                     break
 
+    # KW scoring: заголовок = +2, summary = +1
     for kw_type, kws in KW.items():
         for kw in kws:
-            if kw.lower() in t:
+            kw_l = kw.lower()
+            if kw_l in t_title:
+                scores[kw_type] += 2
+            elif kw_l in t_summary:
                 scores[kw_type] += 1
 
-    best = max(scores, key=scores.get)
+    best  = max(scores, key=scores.get)
     total = scores[best]
 
-    # Гравець або команда = автоматично футбольний контекст
-    if found_players or found_teams:
+    # ACTION WORDS — конкретні події на полі
+    ACTION_WORDS = [
+        "scores","scored","goal","wins","winner","advance","through",
+        "eliminated","knocked out","exit","crashed out","beaten",
+        "VAR","disallowed","robbery","outrage","penalty","red card",
+        "hat trick","brace","hero","qualify","semi-final","final",
+        "bicycle kick","free kick","overhead kick","wonder goal",
+    ]
+    has_action = any(aw in t for aw in ACTION_WORDS)
+
+    # World Cup Entity Rule:
+    # Якщо немає конкретного гравця/команди І немає прямої згадки ЧС — ігноруємо
+    is_world_cup_direct = any(w in t for w in [
+        "world cup","fifa","wc2026","wc 2026","tournament",
+        "group stage","knockout","round of","quarter","semi-final",
+    ])
+    has_entity = len(found_players) > 0 or len(found_teams) > 0
+
+    # VAR/скандальний контент не завжди містить "world cup" в заголовку
+    var_score = scores.get("var", 0)
+    is_var_incident = var_score >= 2  # мінімум 2 VAR тригери = достатньо
+
+    if not has_entity and not is_world_cup_direct and not is_var_incident:
+        return best, 0, [], []
+
+    # Гравець без дії = не тригер (трансфери, інтерв'ю)
+    if found_players and not has_action and not found_teams:
+        return best, 0, found_players, found_teams
+
+    # Команда або World Cup згадка = контекст підтверджений
+    if found_teams or is_world_cup_direct:
         has_football_context = True
 
-    # Якщо немає футбольного контексту — підвищуємо поріг
     if not has_football_context and total < 3:
         return best, 0, found_players, found_teams
 
@@ -345,7 +419,7 @@ def fetch_news():
             for entry in feed.entries[:8]:
                 title   = entry.get("title", "")
                 summary = entry.get("summary", "")
-                product, score, players, teams = score_text(title + " " + summary)
+                product, score, players, teams = score_text(title, summary)
                 # Спрацьовує якщо: score>=2 АБО знайдено конкретного гравця/команду
                 has_entity = len(players) > 0 or len(teams) > 0
                 if score >= 2 or (score >= 1 and has_entity):
