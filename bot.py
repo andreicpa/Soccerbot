@@ -427,9 +427,10 @@ def fetch_news():
                         "source":  source,
                         "title":   title[:100],
                         "product": product,
-                        "score":   score,
+                        "score":   score,   # ← score завжди передається
                         "players": players,
                         "teams":   teams,
+                        "link":    entry.get("link",""),
                     })
         except:
             pass
@@ -438,10 +439,20 @@ def fetch_news():
 
 
 def build_verdict(news_items, api_alerts):
+    # Рахуємо і кількість і сумарний score — score важливіший
     counts = {"apology": 0, "bandwagon": 0, "var": 0}
-    for i in news_items:
-        counts[i["product"]] += 1
+    total_score = {"apology": 0, "bandwagon": 0, "var": 0}
+    max_score = {"apology": 0, "bandwagon": 0, "var": 0}
 
+    for i in news_items:
+        p = i["product"]
+        s = i.get("score", 1)
+        counts[p] += 1
+        total_score[p] += s
+        if s > max_score[p]:
+            max_score[p] = s
+
+    # API алерти — найвищий пріоритет (реальний матч)
     if api_alerts:
         top = api_alerts[0]
         if top[0] == "bandwagon":
@@ -451,17 +462,33 @@ def build_verdict(news_items, api_alerts):
         elif top[0] == "foulplay":
             return "foulplay", "😴 0-0 нічия — FOUL PLAY хук"
 
-    if counts["var"] >= 2:
-        return "var",       "🔥 VAR скандал — постити Certificate ЗАРАЗ"
-    elif counts["bandwagon"] >= 2:
-        return "bandwagon", "🔥 Команди вилітають — Bandwagon хук!"
-    elif counts["apology"] >= 3:
-        return "apology",   "📈 Гравець в тренді — Apology хук"
-    elif sum(counts.values()) > 0:
-        best = max(counts, key=counts.get)
-        return best,        "📊 Є активність — дивись хуки"
+    # Якщо є новина з дуже високим score (конкретна подія з гравцем) — вона виграє
+    # Незалежно від кількості інших новин
+    if max_score["apology"] >= 5:
+        return "apology", "🔥 Гравець зробив щось велике — постити Apology хук!"
+    if max_score["bandwagon"] >= 5:
+        return "bandwagon", "🔥 Велика команда вилітає — Bandwagon хук!"
+
+    # VAR виграє тільки якщо score >= 4 (реальний матчевий VAR, не фоновий скандал)
+    if max_score["var"] >= 4:
+        return "var", "🔥 VAR скандал в матчі — постити Certificate ЗАРАЗ"
+
+    # Інакше — вибираємо по total_score
+    best_by_score = max(total_score, key=total_score.get)
+    best_total = total_score[best_by_score]
+
+    if best_total == 0:
+        return "foulplay", "😴 Тихо. FOUL PLAY хук завжди актуальний"
+
+    if best_by_score == "var" and best_total < 6:
+        # Фоновий VAR контент (referee скандали, старі справи) — не пушимо агресивно
+        return "var", "📰 Є VAR контекст — можна постити Certificate"
+    elif best_by_score == "bandwagon":
+        return "bandwagon", "📈 Команди під тиском — Bandwagon хук актуальний"
+    elif best_by_score == "apology":
+        return "apology", "📈 Гравець в новинах — Apology хук актуальний"
     else:
-        return "foulplay",  "😴 Тихо. FOUL PLAY хук завжди актуальний"
+        return "foulplay", "😴 Немає гострих тригерів. FOUL PLAY завжди актуальний"
 
 # ══════════════════════════════════════════════
 # КОМАНДИ БОТА
