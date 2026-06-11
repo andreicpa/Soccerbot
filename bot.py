@@ -234,6 +234,17 @@ STOP_WORDS = [
     "interview","speaks out","breaks silence","opens up",
     "ranked","ranking","best xi","top 10","history of",
     "preview","what to watch","things to know",
+    # Прогнози і аналітика — не реальні події
+    "could be eliminated","could exit","might exit","face exit",
+    "early exit threat","exit route","exit threat",
+    "path through","most likely to","group stage predictions",
+    "fixture guide","schedule guide","day-by-day",
+    "who goes through","who qualifies","who gets knocked",
+    "preview:","analysis:","verdict:","report card",
+    # Поради і прогнози з модальними словами
+    "how to avoid","can avoid","avoid exit","avoid elimination",
+    "prevent exit","survive group","can they go through",
+    "will they qualify","chances of","odds of","probability",
 ]
 
 # Футбольні контекст-слова — хоча б одне має бути присутнє
@@ -466,8 +477,11 @@ def build_verdict(news_items, api_alerts):
     # Незалежно від кількості інших новин
     if max_score["apology"] >= 5:
         return "apology", "🔥 Гравець зробив щось велике — постити Apology хук!"
-    if max_score["bandwagon"] >= 5:
-        return "bandwagon", "🔥 Велика команда вилітає — Bandwagon хук!"
+    # Bandwagon потребує score >= 9 щоб відсіяти preview/аналітику
+    # Реальний вильот: команда + knocked out + world cup = score 10+
+    # Preview: команда + exit + could = score 6-8
+    if max_score["bandwagon"] >= 9:
+        return "bandwagon", "🔥 Команда вилетіла — Bandwagon хук ЗАРАЗ!"
 
     # VAR виграє тільки якщо score >= 4 (реальний матчевий VAR, не фоновий скандал)
     if max_score["var"] >= 4:
