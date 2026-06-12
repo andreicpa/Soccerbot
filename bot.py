@@ -234,6 +234,11 @@ STOP_WORDS = [
     "interview","speaks out","breaks silence","opens up",
     "ranked","ranking","best xi","top 10","history of",
     "preview","what to watch","things to know",
+    # Інші види спорту з "World Cup" в назві
+    "world cup of darts","world cup of snooker","world cup golf",
+    "darts world cup","snooker world cup","rugby world cup",
+    "cricket world cup","world cup skiing","alpine world cup",
+    "world cup swimming","biathlon world cup",
     # Прогнози і аналітика — не реальні події
     "could be eliminated","could exit","might exit","face exit",
     "early exit threat","exit route","exit threat",
@@ -245,6 +250,11 @@ STOP_WORDS = [
     "how to avoid","can avoid","avoid exit","avoid elimination",
     "prevent exit","survive group","can they go through",
     "will they qualify","chances of","odds of","probability",
+    # Виправдання/пояснення VAR — не скандал
+    "explains the var","explains var decision","var decision explained",
+    "defends var","justifies var","var was correct",
+    "referee explains","ref explains","official explains",
+    "why var","var review process","how var works",
 ]
 
 # Футбольні контекст-слова — хоча б одне має бути присутнє
@@ -483,9 +493,12 @@ def build_verdict(news_items, api_alerts):
     if max_score["bandwagon"] >= 9:
         return "bandwagon", "🔥 Команда вилетіла — Bandwagon хук ЗАРАЗ!"
 
-    # VAR виграє тільки якщо score >= 4 (реальний матчевий VAR, не фоновий скандал)
-    if max_score["var"] >= 4:
+    # VAR виграє тільки якщо score >= 6 (реальний матчевий скандал)
+    # score 4-5 = фоновий VAR контент (пояснення, аналіз)
+    if max_score["var"] >= 6:
         return "var", "🔥 VAR скандал в матчі — постити Certificate ЗАРАЗ"
+    elif max_score["var"] >= 4:
+        return "var", "📰 VAR в новинах — можна постити Certificate"
 
     # Інакше — вибираємо по total_score
     best_by_score = max(total_score, key=total_score.get)
