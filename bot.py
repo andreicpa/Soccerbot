@@ -167,7 +167,7 @@ HOOKS = {
     ),
     "bandwagon": (
         "🟡 *BANDWAGON HOOK — постити ЗАРАЗ:*\n\n"
-        "```\n[Team] fans right now searching\n"
+        "```\n{team} fans right now searching\n"
         "for a new team to support...\n"
         "Time to make it official.\n"
         "Comment FORM and I'll DM it 👇\n"
@@ -175,7 +175,7 @@ HOOKS = {
     ),
     "apology": (
         "🟢 *APOLOGY HOOK — постити ЗАРАЗ:*\n\n"
-        "```\nEveryone who said [Player] was\n"
+        "```\nEveryone who said {player} was\n"
         "finished needs to fill this out.\n"
         "Right now. In public.\n"
         "Comment APOLOGY and I'll DM it 👇\n"
@@ -190,6 +190,29 @@ HOOKS = {
         "[FOUL PLAY Watch Party Game — $4.99]```"
     ),
 }
+
+def get_hook(product, news_items):
+    """Повертає хук з реальним іменем гравця/команди"""
+    template = HOOKS.get(product, HOOKS["foulplay"])
+
+    # Шукаємо гравця або команду з найвищим score
+    player = None
+    team = None
+    for item in sorted(news_items, key=lambda x: x.get("score",0), reverse=True):
+        if item["product"] == product:
+            if item.get("players"):
+                player = item["players"][0]
+                break
+            if item.get("teams"):
+                team = item["teams"][0]
+                break
+
+    # Підставляємо реальне ім'я або дефолт
+    hook = template.format(
+        player=player or "this player",
+        team=team or "their"
+    )
+    return hook
 
 # ══════════════════════════════════════════════
 # ВЕБ-СЕРВЕР (щоб Render не вимикав бота)
@@ -460,7 +483,6 @@ def fetch_news():
 
 
 def build_verdict(news_items, api_alerts):
-    # Рахуємо і кількість і сумарний score — score важливіший
     counts = {"apology": 0, "bandwagon": 0, "var": 0}
     total_score = {"apology": 0, "bandwagon": 0, "var": 0}
     max_score = {"apology": 0, "bandwagon": 0, "var": 0}
@@ -473,7 +495,7 @@ def build_verdict(news_items, api_alerts):
         if s > max_score[p]:
             max_score[p] = s
 
-    # API алерти — найвищий пріоритет (реальний матч)
+    # API алерти — найвищий пріоритет
     if api_alerts:
         top = api_alerts[0]
         if top[0] == "bandwagon":
@@ -483,39 +505,35 @@ def build_verdict(news_items, api_alerts):
         elif top[0] == "foulplay":
             return "foulplay", "😴 0-0 нічия — FOUL PLAY хук"
 
-    # Якщо є новина з дуже високим score (конкретна подія з гравцем) — вона виграє
-    # Незалежно від кількості інших новин
+    # Збираємо всі гарячі тригери
+    hot = []
+
     if max_score["apology"] >= 5:
-        return "apology", "🔥 Гравець зробив щось велике — постити Apology хук!"
-    # Bandwagon потребує score >= 9 щоб відсіяти preview/аналітику
-    # Реальний вильот: команда + knocked out + world cup = score 10+
-    # Preview: команда + exit + could = score 6-8
+        hot.append(("apology", "🔥 Великий перформанс — Apology хук!"))
+    elif total_score["apology"] >= 4:
+        hot.append(("apology", "📈 Гравець в новинах — Apology хук"))
+
     if max_score["bandwagon"] >= 9:
-        return "bandwagon", "🔥 Команда вилетіла — Bandwagon хук ЗАРАЗ!"
+        hot.append(("bandwagon", "🔥 Команда вилетіла — Bandwagon ЗАРАЗ!"))
 
-    # VAR виграє тільки якщо score >= 6 (реальний матчевий скандал)
-    # score 4-5 = фоновий VAR контент (пояснення, аналіз)
-    if max_score["var"] >= 6:
-        return "var", "🔥 VAR скандал в матчі — постити Certificate ЗАРАЗ"
-    elif max_score["var"] >= 4:
-        return "var", "📰 VAR в новинах — можна постити Certificate"
+    if max_score["var"] >= 5:
+        hot.append(("var", "🔥 VAR скандал — Certificate ЗАРАЗ!"))
+    elif max_score["var"] >= 3:
+        hot.append(("var", "📰 VAR в новинах — можна постити Certificate"))
 
-    # Інакше — вибираємо по total_score
-    best_by_score = max(total_score, key=total_score.get)
-    best_total = total_score[best_by_score]
+    if not hot:
+        if sum(total_score.values()) == 0:
+            return "foulplay", "😴 Тихо. FOUL PLAY хук завжди актуальний"
+        best = max(total_score, key=total_score.get)
+        return best, "📊 Слабка активність — перевір хуки вручну"
 
-    if best_total == 0:
-        return "foulplay", "😴 Тихо. FOUL PLAY хук завжди актуальний"
+    # Кілька тригерів — показуємо всі
+    if len(hot) >= 2:
+        lines = "\n".join([f"  {h[1]}" for h in hot])
+        main = max(hot, key=lambda x: max_score[x[0]])
+        return main[0], f"🎯 Кілька тригерів сьогодні:\n{lines}"
 
-    if best_by_score == "var" and best_total < 6:
-        # Фоновий VAR контент (referee скандали, старі справи) — не пушимо агресивно
-        return "var", "📰 Є VAR контекст — можна постити Certificate"
-    elif best_by_score == "bandwagon":
-        return "bandwagon", "📈 Команди під тиском — Bandwagon хук актуальний"
-    elif best_by_score == "apology":
-        return "apology", "📈 Гравець в новинах — Apology хук актуальний"
-    else:
-        return "foulplay", "😴 Немає гострих тригерів. FOUL PLAY завжди актуальний"
+    return hot[0][0], hot[0][1]
 
 # ══════════════════════════════════════════════
 # КОМАНДИ БОТА
@@ -576,6 +594,10 @@ async def cmd_check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         text += f"*📰 ТОП НОВИНИ ({feeds_ok} feeds):*\n{top_news}\n"
     text += f"*🎯 ВЕРДИКТ:*\n{verdict_text}"
 
+    # Зберігаємо news_items в user_data для button_handler
+    ctx.user_data["last_news"] = news_items
+    ctx.user_data["last_product"] = product
+
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("✍️ Показати хук", callback_data=f"hook_{product}")],
         [InlineKeyboardButton("🔗 Gumroad",       callback_data="links")],
@@ -635,6 +657,9 @@ async def cmd_verdict(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     news_items, _         = fetch_news()
     _, api_alerts         = fetch_matches()
     product, verdict_text = build_verdict(news_items, api_alerts)
+    ctx.user_data["last_news"] = news_items
+    ctx.user_data["last_product"] = product
+
     await msg.reply_text(
         f"💡 *ЩО ПОСТИТИ ЗАРАЗ?*\n\n{verdict_text}",
         parse_mode="Markdown",
@@ -669,8 +694,10 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
     elif data.startswith("hook_"):
         product   = data.replace("hook_", "")
-        hook_text = HOOKS.get(product, HOOKS["foulplay"])
-        gumroad   = GUMROAD.get(product, GUMROAD["bundle"])
+        # Використовуємо get_hook з реальними іменами
+        news_items = ctx.user_data.get("last_news", [])
+        hook_text  = get_hook(product, news_items)
+        gumroad    = GUMROAD.get(product, GUMROAD["bundle"])
         await query.message.reply_text(
             f"{hook_text}\n\n🔗 {gumroad}",
             parse_mode="Markdown",
